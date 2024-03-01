@@ -286,6 +286,8 @@ where
             .keylog(self.keylog)
             .transport_config(transport_config)
             .concurrent_connections(MAX_CONNECTIONS)
+            // TODO: Make configurable from builder
+            .pkarr_announce(Default::default())
             .derp_mode(self.derp_mode);
         let endpoint = match self.node_discovery {
             Some(discovery) => endpoint.discovery(discovery),

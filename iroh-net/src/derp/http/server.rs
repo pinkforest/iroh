@@ -18,6 +18,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls_acme::AcmeAcceptor;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, info_span, warn, Instrument};
+use url::Url;
 
 use crate::derp::http::client::Client as HttpClient;
 use crate::derp::http::mesh_clients::{MeshAddrs, MeshClients};
@@ -193,6 +194,10 @@ pub struct ServerBuilder {
     /// When `None`, a default is provided.
     #[debug("{}", not_found_fn.as_ref().map_or("None", |_| "Some(Box<Fn(ResponseBuilder) -> Result<Response<Body>> + Send + Sync + 'static>)"))]
     not_found_fn: Option<HyperHandler>,
+    /// Pkarr relay to publish node announces to.
+    ///
+    /// When `None`, publishing to pkarr is disabled.
+    pkarr_relay: Option<Url>,
 }
 
 impl ServerBuilder {
@@ -209,6 +214,7 @@ impl ServerBuilder {
             derp_override: None,
             headers: HeaderMap::new(),
             not_found_fn: None,
+            pkarr_relay: None,
         }
     }
 
@@ -277,11 +283,21 @@ impl ServerBuilder {
         self
     }
 
+    /// Set a pkarr relay. This enables node announce publishing.
+    pub fn pkarr_relay(mut self, pkarr_relay: Url) -> Self {
+        self.pkarr_relay = Some(pkarr_relay);
+        self
+    }
+
     /// Build and spawn an HTTP(S) derp Server
     pub async fn spawn(self) -> Result<Server> {
         ensure!(self.secret_key.is_some() || self.derp_override.is_some(), "Must provide a `SecretKey` for the derp server OR pass in an override function for the 'derp' endpoint");
         let (derp_handler, derp_server, mesh_clients) = if let Some(secret_key) = self.secret_key {
-            let server = crate::derp::server::Server::new(secret_key.clone(), self.mesh_key);
+            let server = crate::derp::server::Server::new(
+                secret_key.clone(),
+                self.mesh_key,
+                self.pkarr_relay,
+            );
             let packet_fwd = server.packet_forwarder_handler();
             let mesh_clients = if let Some(mesh_addrs) = self.mesh_derpers {
                 ensure!(

@@ -21,6 +21,7 @@ use super::{
     types::{ClientInfo, MeshKey, RateLimiter, ServerInfo},
 };
 
+use crate::derp::codec::PkarrWirePacket;
 use crate::key::{PublicKey, SecretKey};
 use crate::util::AbortingJoinHandle;
 
@@ -76,6 +77,8 @@ pub struct InnerClient {
     reader_task: AbortingJoinHandle<()>,
     /// [`PublicKey`] of the server we are connected to
     server_public_key: PublicKey,
+    /// Whether the server supports publishing pkarr packets for us
+    can_pkarr_publish: bool,
 }
 
 impl Client {
@@ -156,6 +159,21 @@ impl Client {
         self.inner
             .writer_channel
             .send(ClientWriterMessage::ClosePeer(target))
+            .await?;
+        Ok(())
+    }
+
+    /// Send a pkarr packet to the derper to publish for us.
+    ///
+    /// Must be signed by our secret key, otherwise the derper will reject it.
+    pub async fn pkarr_publish_packet(&self, packet: pkarr::SignedPacket) -> Result<()> {
+        if !self.inner.can_pkarr_publish {
+            bail!("the server does not allow pkarr publishing");
+        }
+        // todo: check pkey
+        self.inner
+            .writer_channel
+            .send(ClientWriterMessage::PkarrPublish(packet))
             .await?;
         Ok(())
     }
@@ -253,6 +271,8 @@ enum ClientWriterMessage {
     /// Asks the server to close the target's connection.
     /// Should only be used for mesh clients.
     ClosePeer(PublicKey),
+    /// Publish a pkarr signed packet about ourselves
+    PkarrPublish(pkarr::SignedPacket),
     /// Shutdown the writer
     Shutdown,
 }
@@ -303,6 +323,11 @@ impl<W: AsyncWrite + Unpin + Send + 'static> ClientWriter<W> {
                 }
                 ClientWriterMessage::ClosePeer(peer) => {
                     write_frame(&mut self.writer, Frame::ClosePeer { peer }, None).await?;
+                    self.writer.flush().await?;
+                }
+                ClientWriterMessage::PkarrPublish(packet) => {
+                    let packet = PkarrWirePacket::V0(packet.as_bytes());
+                    write_frame(&mut self.writer, Frame::PkarrPublish { packet }, None).await?;
                     self.writer.flush().await?;
                 }
                 ClientWriterMessage::Shutdown => {
@@ -368,7 +393,7 @@ impl ClientBuilder {
         self
     }
 
-    async fn server_handshake(&mut self) -> Result<(PublicKey, Option<RateLimiter>)> {
+    async fn server_handshake(&mut self) -> Result<(PublicKey, Option<RateLimiter>, bool)> {
         debug!("server_handshake: started");
         let server_key = recv_server_key(&mut self.reader)
             .await
@@ -404,6 +429,8 @@ impl ClientBuilder {
         };
         let mut buf = encrypted_message.to_vec();
         shared_secret.open(&mut buf)?;
+
+        // TODO: Can we parse the server info from old derpers without pkarr support?
         let info: ServerInfo = postcard::from_bytes(&buf)?;
         if info.version != PROTOCOL_VERSION {
             bail!(
@@ -417,12 +444,12 @@ impl ClientBuilder {
         )?;
 
         debug!("server_handshake: done");
-        Ok((server_key, rate_limiter))
+        Ok((server_key, rate_limiter, info.can_pkarr_publish))
     }
 
     pub async fn build(mut self) -> Result<(Client, ClientReceiver)> {
         // exchange information with the server
-        let (server_public_key, rate_limiter) = self.server_handshake().await?;
+        let (server_public_key, rate_limiter, can_pkarr_publish) = self.server_handshake().await?;
 
         // create task to handle writing to the server
         let (writer_sender, writer_recv) = mpsc::channel(PER_CLIENT_SEND_QUEUE_DEPTH);
@@ -485,6 +512,7 @@ impl ClientBuilder {
                 writer_task: writer_task.into(),
                 reader_task: reader_task.into(),
                 server_public_key,
+                can_pkarr_publish,
             }),
         };
 

@@ -16,7 +16,7 @@ use crate::{disco::looks_like_disco_wrapper, key::PublicKey};
 
 use iroh_metrics::{inc, inc_by};
 
-use super::codec::{DerpCodec, Frame};
+use super::codec::{DerpCodec, Frame, PkarrWirePacket};
 use super::server::MaybeTlsStream;
 use super::{
     codec::{write_frame, KEEP_ALIVE},
@@ -89,6 +89,7 @@ where
     pub(crate) write_timeout: Option<Duration>,
     pub(crate) channel_capacity: usize,
     pub(crate) server_channel: mpsc::Sender<ServerMessage<P>>,
+    pub(crate) can_pkarr_publish: bool,
 }
 
 impl<P> ClientConnBuilder<P>
@@ -106,6 +107,7 @@ where
             self.write_timeout,
             self.channel_capacity,
             self.server_channel,
+            self.can_pkarr_publish,
         )
     }
 }
@@ -123,6 +125,7 @@ impl ClientConnManager {
         write_timeout: Option<Duration>,
         channel_capacity: usize,
         server_channel: mpsc::Sender<ServerMessage<P>>,
+        can_pkarr_publish: bool,
     ) -> ClientConnManager
     where
         P: PacketForwarder,
@@ -150,6 +153,7 @@ impl ClientConnManager {
             key,
             preferred: Arc::clone(&preferred),
             server_channel: server_channel.clone(),
+            can_pkarr_publish,
         };
 
         // start io loop
@@ -242,6 +246,8 @@ impl ClientConnManager {
 pub(crate) struct ClientConnIo<P: PacketForwarder> {
     /// Indicates whether this client can mesh
     can_mesh: bool,
+    /// Indicates whether this client can do pkarr publish
+    can_pkarr_publish: bool,
     /// Io to talk to the client
     io: Framed<MaybeTlsStream, DerpCodec>,
     /// Max time we wait to complete a write to the client
@@ -480,6 +486,9 @@ where
             Frame::Health { .. } => {
                 inc!(Metrics, other_packets_recv);
             }
+            Frame::PkarrPublish { packet } => {
+                self.handle_pkarr_publish(packet).await?;
+            }
             _ => {
                 inc!(Metrics, unknown_frames);
             }
@@ -550,6 +559,15 @@ where
     async fn handle_frame_close_peer(&self, key: PublicKey) -> Result<()> {
         ensure!(self.can_mesh, "insufficient permissions");
         self.send_server(ServerMessage::ClosePeer(key)).await?;
+        Ok(())
+    }
+
+    async fn handle_pkarr_publish(&self, frame: PkarrWirePacket) -> Result<()> {
+        ensure!(self.can_pkarr_publish, "insufficient permissions");
+        let res = frame.verify_and_decode(&self.key);
+        let packet = res?;
+        self.send_server(ServerMessage::PkarrPublish(packet))
+            .await?;
         Ok(())
     }
 
@@ -654,6 +672,7 @@ mod tests {
             key,
             server_channel: server_channel_s,
             preferred: Arc::clone(&preferred),
+            can_pkarr_publish: false,
         };
 
         let done = CancellationToken::new();
@@ -865,6 +884,7 @@ mod tests {
             key,
             server_channel: server_channel_s,
             preferred: Arc::clone(&preferred),
+            can_pkarr_publish: false,
         };
 
         let done = CancellationToken::new();

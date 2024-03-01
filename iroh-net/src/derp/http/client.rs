@@ -140,6 +140,7 @@ enum ActorMessage {
     IsConnected(oneshot::Sender<Result<bool, ClientError>>),
     WatchConnectionChanges(oneshot::Sender<Result<(PublicKey, usize), ClientError>>),
     ClosePeer(PublicKey, oneshot::Sender<Result<(), ClientError>>),
+    PkarrPublish(pkarr::SignedPacket),
 }
 
 /// Receiving end of a [`Client`].
@@ -399,6 +400,15 @@ impl Client {
             .ok();
     }
 
+    /// Announce ourselves by sending a [`pkarr::SignedPacket`] to our derper, containing
+    /// information about ourselves, which the derper will publish to a pkarr relay.
+    pub async fn pkarr_publish(&self, packet: pkarr::SignedPacket) {
+        self.inner
+            .send(ActorMessage::PkarrPublish(packet))
+            .await
+            .ok();
+    }
+
     /// Get the local addr of the connection. If there is no current underlying derp connection
     /// or the [`Client`] is closed, returns `None`.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
@@ -609,6 +619,11 @@ impl Actor {
                         ActorMessage::NotePreferred(is_preferred) => {
                             self.note_preferred(is_preferred).await;
                         },
+                        ActorMessage::PkarrPublish(packet)  => {
+                            if let Err(err) = self.pkarr_publish(packet).await {
+                                warn!("pkarr publish to derper failed: {err:?}");
+                            }
+                        },
                         ActorMessage::LocalAddr(s) => {
                             let res = self.local_addr();
                             s.send(Ok(res)).ok();
@@ -800,6 +815,16 @@ impl Actor {
         // if there was an error sending, close the underlying derp connection
         if res.is_err() {
             self.close_for_reconnect().await;
+        }
+    }
+
+    async fn pkarr_publish(&mut self, signed_packet: pkarr::SignedPacket) -> anyhow::Result<()> {
+        if let Some((ref client, _)) = self.derp_client {
+            info!("publish pkarr packet to derper");
+            client.pkarr_publish_packet(signed_packet).await?;
+            Ok(())
+        } else {
+            bail!("not connected")
         }
     }
 
