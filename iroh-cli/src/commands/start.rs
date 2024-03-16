@@ -6,7 +6,7 @@ use futures::Future;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use iroh::node::Node;
 use iroh::{
-    net::relay::{DerpMap, DerpMode},
+    net::relay::{RelayMap, RelayMode},
     node::RpcStatus,
 };
 use tracing::{info_span, Instrument};
@@ -124,7 +124,7 @@ where
 
 pub(crate) async fn start_node(
     iroh_data_root: &Path,
-    relay_map: Option<DerpMap>,
+    relay_map: Option<RelayMap>,
 ) -> Result<Node<iroh::bytes::store::flat::Store>> {
     let rpc_status = RpcStatus::load(iroh_data_root).await?;
     match rpc_status {
@@ -137,8 +137,8 @@ pub(crate) async fn start_node(
     }
 
     let relay_mode = match relay_map {
-        None => DerpMode::Default,
-        Some(relay_map) => DerpMode::Custom(relay_map),
+        None => RelayMode::Default,
+        Some(relay_map) => RelayMode::Custom(relay_map),
     };
 
     Node::persistent(iroh_data_root)

@@ -20,7 +20,7 @@ use iroh_metrics::inc;
 use iroh_net::defaults::{DEFAULT_RELAY_STUN_PORT, NA_RELAY_HOSTNAME};
 use iroh_net::key::SecretKey;
 use iroh_net::relay::http::{
-    ServerBuilder as DerpServerBuilder, TlsAcceptor, TlsConfig as DerpTlsConfig,
+    ServerBuilder as RelayServerBuilder, TlsAcceptor, TlsConfig as DerpTlsConfig,
 };
 use iroh_net::relay::{self};
 use iroh_net::stun;
@@ -433,7 +433,7 @@ async fn run(
         (None, HeaderMap::new(), 0)
     };
 
-    let mut builder = DerpServerBuilder::new(addr)
+    let mut builder = RelayServerBuilder::new(addr)
         .secret_key(secret_key.map(Into::into))
         .headers(headers)
         .tls_config(tls_config.clone())
