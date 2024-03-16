@@ -18,11 +18,11 @@ use hyper::body::Incoming;
 use hyper::{Method, Request, Response, StatusCode};
 use iroh_metrics::inc;
 use iroh_net::defaults::{DEFAULT_RELAY_STUN_PORT, NA_RELAY_HOSTNAME};
-use iroh_net::derp::http::{
+use iroh_net::key::SecretKey;
+use iroh_net::relay::http::{
     ServerBuilder as DerpServerBuilder, TlsAcceptor, TlsConfig as DerpTlsConfig,
 };
-use iroh_net::derp::{self};
-use iroh_net::key::SecretKey;
+use iroh_net::relay::{self};
 use iroh_net::stun;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -520,7 +520,7 @@ async fn serve_captive_portal_service(addr: SocketAddr) -> Result<tokio::task::J
                         let handler = CaptivePortalService;
 
                         tokio::task::spawn(async move {
-                            let stream = derp::MaybeTlsStreamServer::Plain(stream);
+                            let stream = relay::MaybeTlsStreamServer::Plain(stream);
                             let stream = hyper_util::rt::TokioIo::new(stream);
                             if let Err(err) = hyper::server::conn::http1::Builder::new()
                                 .serve_connection(stream, handler)
@@ -864,9 +864,9 @@ mod tests {
     use bytes::Bytes;
     use http_body_util::BodyExt;
     use iroh_base::node_addr::DerpUrl;
-    use iroh_net::derp::http::ClientBuilder;
-    use iroh_net::derp::ReceivedMessage;
     use iroh_net::key::SecretKey;
+    use iroh_net::relay::http::ClientBuilder;
+    use iroh_net::relay::ReceivedMessage;
 
     #[tokio::test]
     async fn test_serve_no_content_handler() {
