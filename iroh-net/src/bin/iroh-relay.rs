@@ -1,4 +1,4 @@
-//! A simple DERP server.
+//! A simple relay server.
 //!
 //! Based on /tailscale/cmd/derper
 
@@ -20,7 +20,7 @@ use iroh_metrics::inc;
 use iroh_net::defaults::{DEFAULT_RELAY_STUN_PORT, NA_RELAY_HOSTNAME};
 use iroh_net::key::SecretKey;
 use iroh_net::relay::http::{
-    ServerBuilder as RelayServerBuilder, TlsAcceptor, TlsConfig as DerpTlsConfig,
+    ServerBuilder as RelayServerBuilder, TlsAcceptor, TlsConfig as RelayTlsConfig,
 };
 use iroh_net::relay::{self};
 use iroh_net::stun;
@@ -317,7 +317,7 @@ pub fn init_metrics_collection(
     // doesn't start the server if the address is None
     if let Some(metrics_addr) = metrics_addr {
         iroh_metrics::core::Core::init(|reg, metrics| {
-            metrics.insert(iroh_net::metrics::DerpMetrics::new(reg));
+            metrics.insert(iroh_net::metrics::RelayMetrics::new(reg));
             metrics.insert(StunMetrics::new(reg));
         });
 
@@ -423,7 +423,7 @@ async fn run(
             headers.insert(*name, value.parse()?);
         }
         (
-            Some(DerpTlsConfig { config, acceptor }),
+            Some(RelayTlsConfig { config, acceptor }),
             headers,
             tls_config
                 .captive_portal_port
@@ -437,7 +437,7 @@ async fn run(
         .secret_key(secret_key.map(Into::into))
         .headers(headers)
         .tls_config(tls_config.clone())
-        .derp_override(Box::new(relay_disabled_handler))
+        .relay_override(Box::new(relay_disabled_handler))
         .request_handler(Method::GET, "/", Box::new(root_handler))
         .request_handler(Method::GET, "/index.html", Box::new(root_handler))
         .request_handler(Method::GET, "/derp/probe", Box::new(probe_handler))
@@ -863,7 +863,7 @@ mod tests {
     use anyhow::Result;
     use bytes::Bytes;
     use http_body_util::BodyExt;
-    use iroh_base::node_addr::DerpUrl;
+    use iroh_base::node_addr::RelayUrl;
     use iroh_net::key::SecretKey;
     use iroh_net::relay::http::ClientBuilder;
     use iroh_net::relay::ReceivedMessage;
@@ -932,7 +932,7 @@ mod tests {
 
         let relay_server_addr = addr_recv.await?;
         let relay_server_str_url = format!("http://{}", relay_server_addr);
-        let relay_server_url: DerpUrl = relay_server_str_url.parse().unwrap();
+        let relay_server_url: RelayUrl = relay_server_str_url.parse().unwrap();
 
         // set up clients
         let a_secret_key = SecretKey::generate();
